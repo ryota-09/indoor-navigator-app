@@ -1,0 +1,3 @@
+[submodule "indoor-navigator-web"]
+	path = indoor-navigator-web
+	url = https://github.com/ryota-09/indoor-navigator-web
