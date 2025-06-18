@@ -13,6 +13,14 @@ This is an **indoor navigation app** project built with **Expo/React Native**. T
 - Multi-floor support
 - Rating and moderation system
 
+### Implemented Features
+- ✅ **Firebase Authentication System** (Issue #2)
+  - Email/password registration and login
+  - Session persistence with AsyncStorage
+  - Automatic navigation based on auth state
+  - User profile management
+  - Secure logout functionality
+
 ## Development Commands
 
 ### Core Commands
