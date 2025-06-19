@@ -2,6 +2,15 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
 import { auth } from '@/config/firebase';
 
+// 開発モードの設定
+const DEV_MODE = process.env.NODE_ENV === 'development' || true; // 開発時は常にtrue
+const MOCK_USER = DEV_MODE ? {
+  uid: 'dev-user-123',
+  email: 'developer@test.com',
+  displayName: 'Developer User',
+  emailVerified: true,
+} as User : null;
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -25,10 +34,18 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(DEV_MODE ? MOCK_USER : null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (DEV_MODE) {
+      // 開発モードでは即座にモックユーザーを設定
+      setUser(MOCK_USER);
+      setLoading(false);
+      return;
+    }
+
+    // 本番モードではFirebase認証を使用
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
@@ -38,6 +55,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    if (DEV_MODE) {
+      // 開発モードではモックログイン
+      console.log('Dev mode: Mock sign in with', email);
+      setUser(MOCK_USER);
+      return;
+    }
+
     try {
       await signInWithEmailAndPassword(auth, email, password);
     } catch (error) {
@@ -46,6 +70,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const signUp = async (email: string, password: string, displayName?: string) => {
+    if (DEV_MODE) {
+      // 開発モードではモック登録
+      console.log('Dev mode: Mock sign up with', email);
+      setUser(MOCK_USER);
+      return;
+    }
+
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       
@@ -60,6 +91,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const logout = async () => {
+    if (DEV_MODE) {
+      // 開発モードではモックログアウト
+      console.log('Dev mode: Mock logout');
+      setUser(null);
+      return;
+    }
+
     try {
       await signOut(auth);
     } catch (error) {

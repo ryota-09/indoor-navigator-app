@@ -9,11 +9,8 @@ export default function Index() {
 
   useEffect(() => {
     if (!loading) {
-      if (user) {
-        router.replace('/(tabs)');
-      } else {
-        router.replace('/(auth)/signin');
-      }
+      // 開発モードでは常にタブ画面へ遷移
+      router.replace('/(tabs)');
     }
   }, [user, loading]);
 
