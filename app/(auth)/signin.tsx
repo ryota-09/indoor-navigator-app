@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, TextInput, Alert, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, TextInput, Alert, StyleSheet, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
 import { Link, router } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -78,17 +78,18 @@ export default function SignInScreen() {
             autoComplete="password"
           />
           
-          <ThemedView 
+          <Pressable 
             style={[
               styles.button,
               { backgroundColor: Colors[colorScheme ?? 'light'].tint }
             ]}
-            onTouchEnd={handleSignIn}
+            onPress={handleSignIn}
+            disabled={loading}
           >
             <ThemedText style={[styles.buttonText, { color: '#fff' }]}>
               {loading ? 'サインイン中...' : 'サインイン'}
             </ThemedText>
-          </ThemedView>
+          </Pressable>
           
           <View style={styles.linkContainer}>
             <ThemedText>アカウントをお持ちでない方は </ThemedText>

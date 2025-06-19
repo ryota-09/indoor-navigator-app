@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, TextInput, Alert, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, TextInput, Alert, StyleSheet, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
 import { Link, router } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -125,17 +125,18 @@ export default function SignUpScreen() {
             autoComplete="password-new"
           />
           
-          <ThemedView 
+          <Pressable 
             style={[
               styles.button,
               { backgroundColor: Colors[colorScheme ?? 'light'].tint }
             ]}
-            onTouchEnd={handleSignUp}
+            onPress={handleSignUp}
+            disabled={loading}
           >
             <ThemedText style={[styles.buttonText, { color: '#fff' }]}>
               {loading ? 'アカウント作成中...' : 'アカウント作成'}
             </ThemedText>
-          </ThemedView>
+          </Pressable>
           
           <View style={styles.linkContainer}>
             <ThemedText>すでにアカウントをお持ちの方は </ThemedText>
