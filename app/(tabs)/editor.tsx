@@ -2,7 +2,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Colors } from "@/constants/Colors";
 import { useColorScheme } from "@/hooks/useColorScheme";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import {
   Alert,
   Dimensions,
@@ -13,14 +13,25 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
+import { useAuth } from "@/contexts/AuthContext";
+import { MapService } from "@/services/mapService";
+import { MapModel } from "@/models/MapModel";
+import {
+  ElementType,
+  MapElement,
+  MapTemplate,
+  TemplateCategory,
+  MapSaveRequest,
+  MapData,
+} from "@/types/map";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 
@@ -29,91 +40,54 @@ const GRID_SIZE = 20;
 const CANVAS_WIDTH = screenWidth * 2;
 const CANVAS_HEIGHT = screenHeight * 2;
 
-// Template element types
-export type ElementType =
-  | "corridor"
-  | "shop"
-  | "stairs"
-  | "entrance"
-  | "restroom";
-
-export interface MapElement {
-  id: string;
-  type: ElementType;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-}
-
-// Map template interfaces
-export type TemplateCategory =
-  | "station"
-  | "office"
-  | "mall"
-  | "hospital"
-  | "school"
-  | "restaurant";
-
-export interface MapTemplate {
-  id: string;
-  name: string;
-  category: TemplateCategory;
-  description: string;
-  thumbnail?: string;
-  elements: MapElement[];
-  metadata: {
-    width: number;
-    height: number;
-    floors: number;
-    tags: string[];
-  };
-}
 
 // Template data
 const mapTemplates: MapTemplate[] = [
   {
     id: "station_basic",
     name: "基本的な駅構内",
-    category: "station",
+    category: TemplateCategory.STATION,
     description: "駅の基本的なレイアウト（ホーム、改札、階段、トイレ）",
     elements: [
       {
         id: "1",
-        type: "corridor",
+        type: ElementType.CORRIDOR,
         x: 100,
         y: 100,
         width: 200,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "2",
-        type: "entrance",
+        type: ElementType.ENTRANCE,
         x: 50,
         y: 100,
         width: 40,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "3",
-        type: "stairs",
+        type: ElementType.STAIRS,
         x: 320,
         y: 80,
         width: 60,
         height: 100,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "4",
-        type: "restroom",
+        type: ElementType.RESTROOM,
         x: 150,
         y: 200,
         width: 80,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
     ],
     metadata: {
@@ -122,48 +96,54 @@ const mapTemplates: MapTemplate[] = [
       floors: 1,
       tags: ["駅", "基本", "交通"],
     },
+    isOfficial: true,
+    isPremium: false,
   },
   {
     id: "office_basic",
     name: "オフィスビル基本レイアウト",
-    category: "office",
+    category: TemplateCategory.OFFICE,
     description: "オフィスビルの基本的なフロア構成",
     elements: [
       {
         id: "1",
-        type: "corridor",
+        type: ElementType.CORRIDOR,
         x: 80,
         y: 120,
         width: 240,
         height: 40,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "2",
-        type: "entrance",
+        type: ElementType.ENTRANCE,
         x: 180,
         y: 60,
         width: 40,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "3",
-        type: "stairs",
+        type: ElementType.STAIRS,
         x: 40,
         y: 80,
         width: 60,
         height: 120,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "4",
-        type: "restroom",
+        type: ElementType.RESTROOM,
         x: 340,
         y: 100,
         width: 60,
         height: 80,
         rotation: 0,
+        floor: 0,
       },
     ],
     metadata: {
@@ -172,57 +152,64 @@ const mapTemplates: MapTemplate[] = [
       floors: 1,
       tags: ["オフィス", "ビル", "ビジネス"],
     },
+    isOfficial: true,
+    isPremium: false,
   },
   {
     id: "mall_basic",
     name: "ショッピングモール",
-    category: "mall",
+    category: TemplateCategory.SHOPPING,
     description: "ショッピングモールの基本的な店舗配置",
     elements: [
       {
         id: "1",
-        type: "corridor",
+        type: ElementType.CORRIDOR,
         x: 120,
         y: 100,
         width: 160,
         height: 40,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "2",
-        type: "shop",
+        type: ElementType.SHOP,
         x: 60,
         y: 60,
         width: 100,
         height: 80,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "3",
-        type: "shop",
+        type: ElementType.SHOP,
         x: 240,
         y: 60,
         width: 100,
         height: 80,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "4",
-        type: "entrance",
+        type: ElementType.ENTRANCE,
         x: 190,
         y: 160,
         width: 40,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "5",
-        type: "restroom",
+        type: ElementType.RESTROOM,
         x: 300,
         y: 160,
         width: 60,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
     ],
     metadata: {
@@ -231,48 +218,54 @@ const mapTemplates: MapTemplate[] = [
       floors: 1,
       tags: ["ショッピング", "モール", "店舗"],
     },
+    isOfficial: true,
+    isPremium: false,
   },
   {
     id: "hospital_basic",
     name: "病院基本レイアウト",
-    category: "hospital",
+    category: TemplateCategory.HOSPITAL,
     description: "病院の基本的なフロア構成",
     elements: [
       {
         id: "1",
-        type: "corridor",
+        type: ElementType.CORRIDOR,
         x: 100,
         y: 120,
         width: 200,
         height: 40,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "2",
-        type: "entrance",
+        type: ElementType.ENTRANCE,
         x: 190,
         y: 60,
         width: 40,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "3",
-        type: "stairs",
+        type: ElementType.STAIRS,
         x: 320,
         y: 80,
         width: 60,
         height: 100,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "4",
-        type: "restroom",
+        type: ElementType.RESTROOM,
         x: 40,
         y: 140,
         width: 60,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
     ],
     metadata: {
@@ -281,48 +274,54 @@ const mapTemplates: MapTemplate[] = [
       floors: 1,
       tags: ["病院", "医療", "ヘルスケア"],
     },
+    isOfficial: true,
+    isPremium: false,
   },
   {
     id: "school_basic",
     name: "学校基本レイアウト",
-    category: "school",
+    category: TemplateCategory.EDUCATION,
     description: "学校の基本的な校舎レイアウト",
     elements: [
       {
         id: "1",
-        type: "corridor",
+        type: ElementType.CORRIDOR,
         x: 80,
         y: 100,
         width: 240,
         height: 40,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "2",
-        type: "entrance",
+        type: ElementType.ENTRANCE,
         x: 190,
         y: 40,
         width: 40,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "3",
-        type: "stairs",
+        type: ElementType.STAIRS,
         x: 40,
         y: 60,
         width: 60,
         height: 120,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "4",
-        type: "restroom",
+        type: ElementType.RESTROOM,
         x: 340,
         y: 80,
         width: 60,
         height: 80,
         rotation: 0,
+        floor: 0,
       },
     ],
     metadata: {
@@ -331,57 +330,64 @@ const mapTemplates: MapTemplate[] = [
       floors: 1,
       tags: ["学校", "教育", "キャンパス"],
     },
+    isOfficial: true,
+    isPremium: false,
   },
   {
     id: "restaurant_basic",
     name: "レストラン基本レイアウト",
-    category: "restaurant",
+    category: TemplateCategory.CUSTOM,
     description: "レストランの基本的な店舗レイアウト",
     elements: [
       {
         id: "1",
-        type: "corridor",
+        type: ElementType.CORRIDOR,
         x: 120,
         y: 80,
         width: 160,
         height: 40,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "2",
-        type: "entrance",
+        type: ElementType.ENTRANCE,
         x: 190,
         y: 40,
         width: 40,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "3",
-        type: "shop",
+        type: ElementType.SHOP,
         x: 60,
         y: 140,
         width: 120,
         height: 80,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "4",
-        type: "shop",
+        type: ElementType.SHOP,
         x: 220,
         y: 140,
         width: 120,
         height: 80,
         rotation: 0,
+        floor: 0,
       },
       {
         id: "5",
-        type: "restroom",
+        type: ElementType.RESTROOM,
         x: 360,
         y: 100,
         width: 60,
         height: 60,
         rotation: 0,
+        floor: 0,
       },
     ],
     metadata: {
@@ -390,35 +396,39 @@ const mapTemplates: MapTemplate[] = [
       floors: 1,
       tags: ["レストラン", "飲食", "店舗"],
     },
+    isOfficial: true,
+    isPremium: false,
   },
 ];
 
 export default function EditorScreen() {
   const colorScheme = useColorScheme();
+  const { user } = useAuth();
   const [elements, setElements] = useState<MapElement[]>([]);
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<ElementType | null>(
-    "corridor"
+    ElementType.CORRIDOR
   );
   const [draggingElement, setDraggingElement] = useState<string | null>(null);
+  
+  // Map metadata
+  const [mapName, setMapName] = useState<string>("");
+  const [mapDescription, setMapDescription] = useState<string>("");
+  const [currentMapId, setCurrentMapId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showLoadModal, setShowLoadModal] = useState(false);
+  const [userMaps, setUserMaps] = useState<MapData[]>([]);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
 
   // Template selection modal state
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [selectedCategory, setSelectedCategory] =
-    useState<TemplateCategory>("station");
+    useState<TemplateCategory>(TemplateCategory.STATION);
 
   // ScrollView reference for auto-scrolling
   const canvasScrollViewRef = useRef<ScrollView>(null);
 
-  // ドラッグ中の要素の表示状態
-  const [draggedElementInfo, setDraggedElementInfo] = useState<{
-    elementId: string;
-    element: MapElement;
-    x: number;
-    y: number;
-    offsetX: number;
-    offsetY: number;
-  } | null>(null);
 
   // Chrome DevToolsでタッチイベントを有効にする手順:
   // 1. F12でDevToolsを開く
@@ -439,8 +449,23 @@ export default function EditorScreen() {
   } | null>(null);
   const [isCanvasHovered, setIsCanvasHovered] = useState(false);
 
-  // ツールモード
-  const [toolMode, setToolMode] = useState<"select" | "place">("place");
+  // ツールモード (将来の機能拡張用に残す)
+  // const [toolMode, setToolMode] = useState<"select" | "place">("place");
+  
+  // Load user maps when component mounts
+  useEffect(() => {
+    const loadUserMaps = async () => {
+      if (user) {
+        try {
+          const maps = await MapService.getUserMaps(user.uid);
+          setUserMaps(maps);
+        } catch (err) {
+          console.error("Failed to load user maps:", err);
+        }
+      }
+    };
+    loadUserMaps();
+  }, [user]);
 
   // 初期スクロール位置の設定（アプリ起動時にキャンバス中央を表示）
   useEffect(() => {
@@ -490,144 +515,102 @@ export default function EditorScreen() {
     saveToHistory([...elements, newElement]);
   };
 
-  const templates: { type: ElementType; name: string; color: string }[] = [
-    { type: "corridor", name: "通路", color: "#F0F0F0" },
-    { type: "shop", name: "店舗", color: "#FFE0B2" },
-    { type: "stairs", name: "階段", color: "#C8E6C9" },
-    { type: "entrance", name: "入口", color: "#FFCDD2" },
-    { type: "restroom", name: "トイレ", color: "#E1BEE7" },
-  ];
+  const templates = useMemo(() => [
+    { type: ElementType.CORRIDOR, name: "通路", color: "#F0F0F0" },
+    { type: ElementType.SHOP, name: "店舗", color: "#FFE0B2" },
+    { type: ElementType.STAIRS, name: "階段", color: "#C8E6C9" },
+    { type: ElementType.ENTRANCE, name: "入口", color: "#FFCDD2" },
+    { type: ElementType.RESTROOM, name: "トイレ", color: "#E1BEE7" },
+    { type: ElementType.ELEVATOR, name: "エレベーター", color: "#B3E5FC" },
+    { type: ElementType.ESCALATOR, name: "エスカレーター", color: "#C5E1A5" },
+    { type: ElementType.EXIT, name: "出口", color: "#FFCCBC" },
+    { type: ElementType.INFORMATION, name: "案内所", color: "#D1C4E9" },
+  ], []);
 
   const templateCategories: {
     category: TemplateCategory;
     name: string;
     icon: string;
   }[] = [
-    { category: "station", name: "駅", icon: "🚉" },
-    { category: "office", name: "オフィス", icon: "🏢" },
-    { category: "mall", name: "モール", icon: "🛍️" },
-    { category: "hospital", name: "病院", icon: "🏥" },
-    { category: "school", name: "学校", icon: "🏫" },
-    { category: "restaurant", name: "レストラン", icon: "🍽️" },
+    { category: TemplateCategory.STATION, name: "駅", icon: "🚉" },
+    { category: TemplateCategory.OFFICE, name: "オフィス", icon: "🏢" },
+    { category: TemplateCategory.SHOPPING, name: "ショッピング", icon: "🛍️" },
+    { category: TemplateCategory.HOSPITAL, name: "病院", icon: "🏥" },
+    { category: TemplateCategory.EDUCATION, name: "教育施設", icon: "🏫" },
+    { category: TemplateCategory.CUSTOM, name: "カスタム", icon: "🔧" },
   ];
 
   // Template functions
   const loadMapTemplate = (template: MapTemplate) => {
-    // テンプレートが空でないことを確認
-    if (!template.elements || template.elements.length === 0) {
-      console.error("❌ Template has no elements");
-      return;
-    }
-
-    // テンプレートの境界を計算
-    const templateBounds = template.elements.reduce(
-      (bounds, element) => ({
-        minX: Math.min(bounds.minX, element.x),
-        minY: Math.min(bounds.minY, element.y),
-        maxX: Math.max(bounds.maxX, element.x + element.width),
-        maxY: Math.max(bounds.maxY, element.y + element.height),
-      }),
-      { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
-    );
-
-    // テンプレートのサイズを計算
-    const templateWidth = templateBounds.maxX - templateBounds.minX;
-    const templateHeight = templateBounds.maxY - templateBounds.minY;
-
-    // キャンバス中央に配置するためのオフセットを計算
-    const centerX = CANVAS_WIDTH / 2;
-    const centerY = CANVAS_HEIGHT / 2;
-    const offsetX = centerX - templateWidth / 2 - templateBounds.minX;
-    const offsetY = centerY - templateHeight / 2 - templateBounds.minY;
-
-    // 要素を中央に配置して新しいIDを付与
-    const newElements = template.elements.map((element) => ({
-      ...element,
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      x: snapToGrid(element.x + offsetX),
-      y: snapToGrid(element.y + offsetY),
-    }));
-
-    saveToHistory(newElements);
-    setShowTemplateModal(false);
-    setSelectedElement(null);
-
-    // テンプレートロード後、配置された要素の中央が画面の中央に来るようにスクロール
-    setTimeout(() => {
-      if (canvasScrollViewRef.current && newElements.length > 0) {
-        // 実際に配置された要素の境界を計算
-        const placedBounds = newElements.reduce(
-          (bounds, element) => ({
-            minX: Math.min(bounds.minX, element.x),
-            minY: Math.min(bounds.minY, element.y),
-            maxX: Math.max(bounds.maxX, element.x + element.width),
-            maxY: Math.max(bounds.maxY, element.y + element.height),
-          }),
-          { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
-        );
-
-        // 配置された要素群の中央座標を計算
-        const placedCenterX = (placedBounds.minX + placedBounds.maxX) / 2;
-        const placedCenterY = (placedBounds.minY + placedBounds.maxY) / 2;
-
-        // contentContainerStyleのpaddingを考慮
-        const contentPadding = 20;
-
-        // ビューポートのサイズを取得（ScrollViewの表示領域）
-        const viewportWidth = screenWidth;
-        const viewportHeight = screenHeight - 200; // ヘッダーやツールバーの高さを考慮
-
-        // スクロール位置を計算（配置された要素の中央が画面中央に来るように）
-        const scrollX = placedCenterX - viewportWidth / 2 + contentPadding;
-        const scrollY = placedCenterY - viewportHeight / 2 + contentPadding;
-
-        console.log("Scroll Debug:", {
-          placedCenterX,
-          placedCenterY,
-          viewportWidth,
-          viewportHeight,
-          scrollX,
-          scrollY,
-          canvasWidth: CANVAS_WIDTH,
-          canvasHeight: CANVAS_HEIGHT,
-        });
-
-        // スクロール可能な最大値を計算
-        const maxScrollX = Math.max(
-          0,
-          CANVAS_WIDTH + contentPadding * 2 - viewportWidth
-        );
-        const maxScrollY = Math.max(
-          0,
-          CANVAS_HEIGHT + contentPadding * 2 - viewportHeight
-        );
-
-        canvasScrollViewRef.current.scrollTo({
-          x: Math.min(Math.max(0, scrollX), maxScrollX),
-          y: Math.min(Math.max(0, scrollY), maxScrollY),
-          animated: true,
-        });
+    try {
+      console.log("🔄 Loading template:", template.name);
+      
+      // テンプレートが空でないことを確認
+      if (!template.elements || template.elements.length === 0) {
+        console.error("❌ Template has no elements");
+        Alert.alert("エラー", "このテンプレートには要素がありません");
+        return;
       }
-    }, 200); // タイミングを少し遅らせる
+
+      // 要素を簡単に中央に配置
+      const centerX = CANVAS_WIDTH / 2;
+      const centerY = CANVAS_HEIGHT / 2;
+      const baseOffsetX = centerX - 100; // 簡単なオフセット
+      const baseOffsetY = centerY - 100;
+
+      // 要素を配置して新しいIDを付与
+      const newElements = template.elements.map((element, index) => {
+        // floor プロパティがない場合は追加
+        const updatedElement = {
+          ...element,
+          floor: element.floor ?? 0, // floor プロパティを追加
+          id: `template_${Date.now()}_${index}`,
+          x: snapToGrid(element.x + baseOffsetX),
+          y: snapToGrid(element.y + baseOffsetY),
+        };
+        
+        console.log("📍 Element created:", updatedElement);
+        return updatedElement;
+      });
+
+      console.log("✅ All elements created:", newElements.length);
+      
+      // ヒストリーに保存
+      saveToHistory(newElements);
+      setShowTemplateModal(false);
+      setSelectedElement(null);
+      
+      console.log("✅ Template loaded successfully");
+    } catch (error) {
+      console.error("❌ Error loading template:", error);
+      Alert.alert("エラー", "テンプレートの読み込みに失敗しました");
+    }
   };
 
   const getTemplatesByCategory = (
     category: TemplateCategory
   ): MapTemplate[] => {
-    return mapTemplates.filter((template) => template.category === category);
+    try {
+      const filtered = mapTemplates.filter((template) => template.category === category);
+      console.log(`📁 Found ${filtered.length} templates for category:`, category);
+      return filtered;
+    } catch (error) {
+      console.error("❌ Error filtering templates:", error);
+      return [];
+    }
   };
 
-  const snapToGrid = (value: number): number => {
+  const snapToGrid = useCallback((value: number): number => {
     return Math.round(value / GRID_SIZE) * GRID_SIZE;
-  };
+  }, []);
 
-  const saveToHistory = (newElements: MapElement[]) => {
+  const saveToHistory = useCallback((newElements: MapElement[]) => {
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push([...newElements]);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
     setElements(newElements);
-  };
+  }, [history, historyIndex]);
 
   const undo = () => {
     if (historyIndex > 0) {
@@ -647,12 +630,13 @@ export default function EditorScreen() {
     }
   };
 
-  const generateGrid = () => {
-    const gridLines: React.ReactNode[] = [];
+  const gridLines = useMemo(() => {
+    const lines: React.ReactNode[] = [];
+    const gridColor = Colors[colorScheme ?? "light"].tabIconDefault;
 
     // Vertical lines
     for (let x = 0; x <= CANVAS_WIDTH; x += GRID_SIZE) {
-      gridLines.push(
+      lines.push(
         <View
           key={`v-${x}`}
           style={[
@@ -661,7 +645,7 @@ export default function EditorScreen() {
               left: x,
               height: CANVAS_HEIGHT,
               width: 1,
-              backgroundColor: Colors[colorScheme ?? "light"].tabIconDefault,
+              backgroundColor: gridColor,
               zIndex: 1,
             },
           ]}
@@ -671,7 +655,7 @@ export default function EditorScreen() {
 
     // Horizontal lines
     for (let y = 0; y <= CANVAS_HEIGHT; y += GRID_SIZE) {
-      gridLines.push(
+      lines.push(
         <View
           key={`h-${y}`}
           style={[
@@ -680,7 +664,7 @@ export default function EditorScreen() {
               top: y,
               width: CANVAS_WIDTH,
               height: 1,
-              backgroundColor: Colors[colorScheme ?? "light"].tabIconDefault,
+              backgroundColor: gridColor,
               zIndex: 1,
             },
           ]}
@@ -688,8 +672,8 @@ export default function EditorScreen() {
       );
     }
 
-    return gridLines;
-  };
+    return lines;
+  }, [colorScheme]);
 
   // マウス移動でプレビュー位置更新
   const handleCanvasMouseMove = (event: any) => {
@@ -719,7 +703,7 @@ export default function EditorScreen() {
     setPreviewPosition(null);
   };
 
-  const handleCanvasPress = (event: any) => {
+  const handleCanvasPress = useCallback((event: any) => {
     // ドラッグ中は新しい要素を作成しない
     if (draggingElement) return;
 
@@ -775,26 +759,30 @@ export default function EditorScreen() {
       width: GRID_SIZE * 3,
       height: GRID_SIZE * 2,
       rotation: 0,
+      floor: 0,
     };
 
     console.log("Creating element:", newElement);
-    saveToHistory([...elements, newElement]);
+    
+    // 緊急度の低い更新をstartTransitionでラップ
+    startTransition(() => {
+      saveToHistory([...elements, newElement]);
+      setPreviewPosition({ x: snappedX, y: snappedY });
+    });
+  }, [selectedTemplate, elements, draggingElement, saveToHistory, snapToGrid]);
 
-    setPreviewPosition({ x: snappedX, y: snappedY });
-  };
+  // const handleElementPress = (elementId: string) => {
+  //   setSelectedElement(elementId === selectedElement ? null : elementId);
+  // };
 
-  const handleElementPress = (elementId: string) => {
-    setSelectedElement(elementId === selectedElement ? null : elementId);
-  };
-
-  const rotateElement = (elementId: string) => {
-    const newElements = elements.map((element) =>
-      element.id === elementId
-        ? { ...element, rotation: (element.rotation + 30) % 360 }
-        : element
-    );
-    saveToHistory(newElements);
-  };
+  // const rotateElement = (elementId: string) => {
+  //   const newElements = elements.map((element) =>
+  //     element.id === elementId
+  //       ? { ...element, rotation: (element.rotation + 30) % 360 }
+  //       : element
+  //   );
+  //   saveToHistory(newElements);
+  // };
 
   const deleteElement = (elementId: string) => {
     const newElements = elements.filter((element) => element.id !== elementId);
@@ -802,12 +790,12 @@ export default function EditorScreen() {
     setSelectedElement(null);
   };
 
-  const getElementColor = (type: ElementType): string => {
+  const getElementColor = useCallback((type: ElementType): string => {
     return templates.find((t) => t.type === type)?.color || "#E0E0E0";
-  };
+  }, [templates]);
 
   // 要素の位置更新（ドラッグ終了時）
-  const updateElementPosition = (
+  const updateElementPosition = useCallback((
     elementId: string,
     newX: number,
     newY: number
@@ -826,8 +814,12 @@ export default function EditorScreen() {
     );
 
     console.log("New elements array:", newElements);
-    saveToHistory(newElements);
-  };
+    
+    // 位置更新も緊急度を下げる
+    startTransition(() => {
+      saveToHistory(newElements);
+    });
+  }, [elements, saveToHistory, snapToGrid]);
 
   // 直感的な要素操作機能
   const [lastTapTime, setLastTapTime] = useState(0);
@@ -842,267 +834,116 @@ export default function EditorScreen() {
     saveToHistory(newElements);
   };
 
-  // ドラッグ終了時の処理
-  const handleDragEnd = () => {
-    setDraggedElementInfo(null);
-  };
 
-  // 改良されたWeb/Native両対応のドラッグ要素コンポーネント
-  const DraggableElement = ({ element }: { element: MapElement }) => {
+  // 軽量化されたドラッグ要素コンポーネント
+  const DraggableElement = React.memo(function DraggableElement({ element }: { element: MapElement }) {
     const translateX = useSharedValue(0);
     const translateY = useSharedValue(0);
     const scale = useSharedValue(1);
     const elementRef = useRef<View>(null);
-    const isDraggingRef = useRef(false);
-    const dragStartPosRef = useRef({ x: 0, y: 0 });
-    const elementStartPosRef = useRef({ x: 0, y: 0 });
-    const elementOffsetRef = useRef({ x: 0, y: 0 });
 
-    // Web環境でのみDOM操作を行う（改良版）
-    useEffect(() => {
-      if (Platform.OS !== "web" || !elementRef.current) return;
-
-      // React Native WebでDOM要素を取得する改良版
-      // @ts-ignore
-      let domElement = elementRef.current;
-
-      // 複数の方法でDOM要素の取得を試行
-      try {
-        // 方法1: _nativeTagを使用（古いRN Web）
-        // @ts-ignore
-        if (
-          elementRef.current._nativeTag &&
-          typeof elementRef.current._nativeTag === "object"
-        ) {
-          // @ts-ignore
-          domElement = elementRef.current._nativeTag;
-        }
-        // 方法2: getDOMNodeを使用（新しいRN Web）
-        // @ts-ignore
-        else if (
-          elementRef.current.getDOMNode &&
-          typeof elementRef.current.getDOMNode === "function"
-        ) {
-          // @ts-ignore
-          domElement = elementRef.current.getDOMNode();
-        }
-        // 方法3: 直接DOM要素を確認
-        // @ts-ignore
-        else if (elementRef.current.nodeType) {
-          // @ts-ignore
-          domElement = elementRef.current;
-        }
-      } catch (error) {
-        console.error("Failed to get DOM element:", error);
+    // Web環境での軽量化されたドラッグ処理
+    const handleDragStart = useCallback((e: any) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // ダブルタップ検出
+      const currentTime = Date.now();
+      if (currentTime - lastTapTime < 300) {
+        handleDoubleTap(element.id);
+        setLastTapTime(0);
+        return;
       }
+      setLastTapTime(currentTime);
 
-      if (!domElement || typeof domElement.addEventListener !== "function") {
-        console.log("DOM element not accessible for element:", element.id);
-        // フォールバック: 直接elementRefを使用
-        // @ts-ignore
-        domElement = elementRef.current;
-      }
-
-      console.log("DOM element found for:", element.id, domElement);
-
-      const handleStart = (
-        clientX: number,
-        clientY: number,
-        elementRect?: DOMRect
-      ) => {
-        console.log("Drag start", element.id);
-
-        // ダブルタップ検出
-        const currentTime = Date.now();
-        if (currentTime - lastTapTime < 300) {
-          handleDoubleTap(element.id);
-          setLastTapTime(0);
-          return;
-        }
-        setLastTapTime(currentTime);
-
-        isDraggingRef.current = true;
-
-        // ドラッグ開始位置を記録
-        dragStartPosRef.current = { x: clientX, y: clientY };
-        elementStartPosRef.current = { x: element.x, y: element.y };
-
-        // 要素内でのクリック位置を計算
-        let offsetX = element.width / 2;
-        let offsetY = element.height / 2;
-
-        if (elementRect) {
-          offsetX = clientX - elementRect.left;
-          offsetY = clientY - elementRect.top;
-        }
-
-        elementOffsetRef.current = { x: offsetX, y: offsetY };
-
-        setSelectedElement(element.id);
-        runOnJS(setDraggingElement)(element.id);
-
-        // ドラッグ情報を設定
-        runOnJS(setDraggedElementInfo)({
-          elementId: element.id,
-          element: element,
-          x: element.x,
-          y: element.y,
-          offsetX: offsetX,
-          offsetY: offsetY,
-        });
-
-        scale.value = withSpring(1.1);
+      setSelectedElement(element.id);
+      setDraggingElement(element.id);
+      scale.value = withSpring(1.1);
+      
+      // 簡略化されたドラッグ処理をグローバルレベルで処理
+      const startX = e.clientX || e.touches?.[0]?.clientX || 0;
+      const startY = e.clientY || e.touches?.[0]?.clientY || 0;
+      
+      let lastX = startX;
+      let lastY = startY;
+      
+      const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+        const clientX = 'clientX' in moveEvent ? moveEvent.clientX : moveEvent.touches[0].clientX;
+        const clientY = 'clientY' in moveEvent ? moveEvent.clientY : moveEvent.touches[0].clientY;
+        
+        const dx = clientX - lastX;
+        const dy = clientY - lastY;
+        
+        translateX.value += dx;
+        translateY.value += dy;
+        
+        lastX = clientX;
+        lastY = clientY;
       };
-
-      const handleMove = (clientX: number, clientY: number) => {
-        if (!isDraggingRef.current) return;
-
-        // ドラッグ開始位置からの移動量を計算
-        const dx = clientX - dragStartPosRef.current.x;
-        const dy = clientY - dragStartPosRef.current.y;
-
-        translateX.value = dx;
-        translateY.value = dy;
-
-        // Canvas座標でのプレビュー位置更新
-        const newX = elementStartPosRef.current.x + dx;
-        const newY = elementStartPosRef.current.y + dy;
-
-        runOnJS(setDraggedElementInfo)((prev: any) => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            x: newX,
-            y: newY,
-          };
-        });
-      };
-
+      
       const handleEnd = () => {
-        if (!isDraggingRef.current) return;
-
-        console.log("Drag end", element.id);
-
-        // 最終位置を計算
-        const finalX = elementStartPosRef.current.x + translateX.value;
-        const finalY = elementStartPosRef.current.y + translateY.value;
-
-        // Canvasの範囲内に制限
-        const boundedX = Math.max(
-          0,
-          Math.min(CANVAS_WIDTH - element.width, finalX)
-        );
-        const boundedY = Math.max(
-          0,
-          Math.min(CANVAS_HEIGHT - element.height, finalY)
-        );
-
-        runOnJS(updateElementPosition)(element.id, boundedX, boundedY);
-
-        // アニメーションをリセット
+        const finalX = element.x + translateX.value;
+        const finalY = element.y + translateY.value;
+        
+        const boundedX = Math.max(0, Math.min(CANVAS_WIDTH - element.width, finalX));
+        const boundedY = Math.max(0, Math.min(CANVAS_HEIGHT - element.height, finalY));
+        
+        // ドラッグ終了時の状態更新を最適化
+        setDraggingElement(null);
+        
+        // アニメーション終了を即座に実行
         translateX.value = withSpring(0);
         translateY.value = withSpring(0);
         scale.value = withSpring(1);
-
-        isDraggingRef.current = false;
-        runOnJS(setDraggingElement)(null);
-        runOnJS(handleDragEnd)();
-      };
-
-      // マウスイベント
-      const onMouseDown = (e: MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const elementRect = domElement.getBoundingClientRect();
-        handleStart(e.clientX, e.clientY, elementRect);
-
-        const onMouseMove = (e: MouseEvent) => {
-          e.preventDefault();
-          handleMove(e.clientX, e.clientY);
-        };
-
-        const onMouseUp = () => {
-          handleEnd();
-          document.removeEventListener("mousemove", onMouseMove);
-          document.removeEventListener("mouseup", onMouseUp);
-        };
-
-        document.addEventListener("mousemove", onMouseMove);
-        document.addEventListener("mouseup", onMouseUp);
-      };
-
-      // タッチイベント
-      const onTouchStart = (e: TouchEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const touch = e.touches[0];
-        const elementRect = domElement.getBoundingClientRect();
-        handleStart(touch.clientX, touch.clientY, elementRect);
-
-        const onTouchMove = (e: TouchEvent) => {
-          e.preventDefault();
-          const touch = e.touches[0];
-          handleMove(touch.clientX, touch.clientY);
-        };
-
-        const onTouchEnd = () => {
-          handleEnd();
-          document.removeEventListener("touchmove", onTouchMove);
-          document.removeEventListener("touchend", onTouchEnd);
-        };
-
-        document.addEventListener("touchmove", onTouchMove, { passive: false });
-        document.addEventListener("touchend", onTouchEnd);
-      };
-
-      try {
-        domElement.addEventListener("mousedown", onMouseDown);
-        domElement.addEventListener("touchstart", onTouchStart, {
-          passive: false,
+        
+        // 位置更新は緊急度を下げる
+        startTransition(() => {
+          updateElementPosition(element.id, boundedX, boundedY);
         });
+        
+        document.removeEventListener('mousemove', handleMove);
+        document.removeEventListener('mouseup', handleEnd);
+        document.removeEventListener('touchmove', handleMove as any);
+        document.removeEventListener('touchend', handleEnd);
+      };
+      
+      document.addEventListener('mousemove', handleMove);
+      document.addEventListener('mouseup', handleEnd);
+      document.addEventListener('touchmove', handleMove as any, { passive: false });
+      document.addEventListener('touchend', handleEnd);
+    }, [element, translateX, translateY, scale]);
 
-        // スタイル設定（より確実な方法）
-        if (domElement.style) {
-          domElement.style.cursor = "move";
-          domElement.style.touchAction = "none";
-          domElement.style.userSelect = "none";
-          domElement.style.webkitUserSelect = "none";
-          domElement.style.webkitTouchCallout = "none";
-          domElement.style.webkitUserDrag = "none";
-          domElement.style.mozUserSelect = "none";
-          domElement.style.msUserSelect = "none";
-          domElement.style.pointerEvents = "auto";
-        }
-
-        // データ属性を追加してデバッグを容易にする
-        if (domElement.setAttribute) {
-          domElement.setAttribute("data-draggable-element", element.id);
-          domElement.setAttribute("data-element-type", element.type);
-        }
-      } catch (error) {
-        console.error("Failed to set up drag handlers:", error);
-      }
-
+    // Web環境でのイベント設定を最小限に
+    useEffect(() => {
+      if (Platform.OS !== 'web' || !elementRef.current) return;
+      
+      const element_dom = (elementRef.current as any)?._nativeTag || 
+                         (elementRef.current as any)?.getDOMNode?.() || 
+                         elementRef.current;
+      
+      if (!element_dom?.addEventListener) return;
+      
+      element_dom.addEventListener('mousedown', handleDragStart);
+      element_dom.addEventListener('touchstart', handleDragStart, { passive: false });
+      element_dom.style.cursor = 'move';
+      element_dom.style.touchAction = 'none';
+      element_dom.style.userSelect = 'none';
+      element_dom.setAttribute('data-draggable-element', element.id);
+      
       return () => {
-        try {
-          domElement.removeEventListener("mousedown", onMouseDown);
-          domElement.removeEventListener("touchstart", onTouchStart);
-        } catch (error) {
-          console.error("Failed to cleanup event listeners:", error);
-        }
+        element_dom.removeEventListener('mousedown', handleDragStart);
+        element_dom.removeEventListener('touchstart', handleDragStart);
       };
-    }, [element.id]);
+    }, [handleDragStart, element.id]);
 
-    const animatedStyle = useAnimatedStyle(() => {
-      return {
-        transform: [
-          { translateX: translateX.value },
-          { translateY: translateY.value },
-          { rotate: `${element.rotation}deg` },
-          { scale: scale.value },
-        ],
-      };
-    });
+    const animatedStyle = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value },
+        { rotate: `${element.rotation}deg` },
+        { scale: scale.value },
+      ],
+    }), [element.rotation]);
 
     return (
       <Animated.View
@@ -1146,25 +987,38 @@ export default function EditorScreen() {
         </Text>
       </Animated.View>
     );
-  };
+  }, (prevProps, nextProps) => {
+    return (
+      prevProps.element.id === nextProps.element.id &&
+      prevProps.element.x === nextProps.element.x &&
+      prevProps.element.y === nextProps.element.y &&
+      prevProps.element.width === nextProps.element.width &&
+      prevProps.element.height === nextProps.element.height &&
+      prevProps.element.type === nextProps.element.type &&
+      prevProps.element.rotation === nextProps.element.rotation
+    );
+  });
 
   return (
     <ThemedView style={styles.container}>
+      {/* Overlay to close actions menu */}
+      {showActionsMenu && (
+        <Pressable
+          style={styles.overlay}
+          onPress={() => setShowActionsMenu(false)}
+        />
+      )}
       {/* Header */}
       <View style={styles.header}>
-        <ThemedText type="title">
-          マップエディタ ({elements.length}個)
-        </ThemedText>
-        <View style={styles.headerActions}>
-          <Pressable
-            style={[
-              styles.templateButton,
-              { backgroundColor: Colors[colorScheme ?? "light"].tint },
-            ]}
-            onPress={() => setShowTemplateModal(true)}
-          >
-            <Text style={styles.templateButtonText}>📋 テンプレート</Text>
-          </Pressable>
+        <View style={styles.headerLeft}>
+          <ThemedText type="title">
+            マップエディタ
+          </ThemedText>
+          <Text style={styles.elementCount}>({elements.length}個)</Text>
+        </View>
+        
+        <View style={styles.headerRight}>
+          {/* Undo/Redo buttons */}
           <View style={styles.undoRedoButtons}>
             <Pressable
               style={[
@@ -1179,14 +1033,7 @@ export default function EditorScreen() {
               onPress={undo}
               disabled={historyIndex <= 0}
             >
-              <Text
-                style={[
-                  styles.undoRedoButtonText,
-                  { opacity: historyIndex > 0 ? 1 : 0.5 },
-                ]}
-              >
-                元に戻す
-              </Text>
+              <Text style={styles.undoRedoIcon}>↶</Text>
             </Pressable>
             <Pressable
               style={[
@@ -1201,15 +1048,99 @@ export default function EditorScreen() {
               onPress={redo}
               disabled={historyIndex >= history.length - 1}
             >
-              <Text
-                style={[
-                  styles.undoRedoButtonText,
-                  { opacity: historyIndex < history.length - 1 ? 1 : 0.5 },
-                ]}
-              >
-                やり直し
-              </Text>
+              <Text style={styles.undoRedoIcon}>↷</Text>
             </Pressable>
+          </View>
+          
+          {/* Actions menu */}
+          <View style={styles.actionsMenuContainer}>
+            <Pressable
+              style={[
+                styles.actionsMenuButton,
+                { backgroundColor: Colors[colorScheme ?? "light"].tint },
+              ]}
+              onPress={() => setShowActionsMenu(!showActionsMenu)}
+            >
+              <Text style={styles.actionsMenuButtonText}>⋯</Text>
+            </Pressable>
+            
+            {showActionsMenu && (
+              <View style={[styles.actionsDropdown, {
+                borderColor: Colors[colorScheme ?? "light"].border || "#E0E0E0",
+                borderWidth: 1,
+              }]}>
+                <Pressable
+                  style={styles.actionItem}
+                  onPress={() => {
+                    try {
+                      console.log("📋 Opening template modal");
+                      setShowTemplateModal(true);
+                      setShowActionsMenu(false);
+                    } catch (error) {
+                      console.error("❌ Error opening template modal:", error);
+                    }
+                  }}
+                >
+                  <Text style={styles.actionItemIcon}>📋</Text>
+                  <Text style={styles.actionItemText}>テンプレート</Text>
+                </Pressable>
+                
+                <Pressable
+                  style={[
+                    styles.actionItem,
+                    (!user || elements.length === 0) && styles.actionItemDisabled
+                  ]}
+                  onPress={() => {
+                    if (user && elements.length > 0) {
+                      setShowSaveModal(true);
+                      setShowActionsMenu(false);
+                    }
+                  }}
+                  disabled={!user || elements.length === 0}
+                >
+                  <Text style={styles.actionItemIcon}>💾</Text>
+                  <Text style={[
+                    styles.actionItemText,
+                    (!user || elements.length === 0) && styles.actionItemTextDisabled
+                  ]}>保存</Text>
+                </Pressable>
+                
+                <Pressable
+                  style={[
+                    styles.actionItem,
+                    !user && styles.actionItemDisabled
+                  ]}
+                  onPress={async () => {
+                    if (user) {
+                      const maps = await MapService.getUserMaps(user.uid);
+                      setUserMaps(maps);
+                      setShowLoadModal(true);
+                      setShowActionsMenu(false);
+                    }
+                  }}
+                  disabled={!user}
+                >
+                  <Text style={styles.actionItemIcon}>📂</Text>
+                  <Text style={[
+                    styles.actionItemText,
+                    !user && styles.actionItemTextDisabled
+                  ]}>読み込み</Text>
+                </Pressable>
+                
+                {elements.length > 0 && (
+                  <Pressable
+                    style={styles.actionItem}
+                    onPress={() => {
+                      clearAll();
+                      setShowActionsMenu(false);
+                    }}
+                  >
+                    <Text style={styles.actionItemIcon}>🗑️</Text>
+                    <Text style={styles.actionItemText}>全削除</Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
           </View>
         </View>
       </View>
@@ -1257,7 +1188,7 @@ export default function EditorScreen() {
                 ]}
                 onPress={duplicateSelected}
               >
-                <Text style={styles.quickActionText}>複製</Text>
+                <Text style={styles.quickActionText}>📋 複製</Text>
               </Pressable>
               <Pressable
                 style={[
@@ -1266,17 +1197,9 @@ export default function EditorScreen() {
                 ]}
                 onPress={() => deleteElement(selectedElement)}
               >
-                <Text style={styles.quickActionText}>削除</Text>
+                <Text style={styles.quickActionText}>🗑️ 削除</Text>
               </Pressable>
             </>
-          )}
-          {elements.length > 0 && (
-            <Pressable
-              style={[styles.quickActionButton, { backgroundColor: "#FFA726" }]}
-              onPress={clearAll}
-            >
-              <Text style={styles.quickActionText}>全削除</Text>
-            </Pressable>
           )}
         </View>
       </View>
@@ -1408,9 +1331,9 @@ export default function EditorScreen() {
             />
           )}
           {/* Grid */}
-          {generateGrid()}
+          {gridLines}
 
-          {/* Elements */}
+          {/* Elements - 仮想化を考慮した描画 */}
           {elements.map((element) => (
             <DraggableElement key={element.id} element={element} />
           ))}
@@ -1445,8 +1368,8 @@ export default function EditorScreen() {
               </View>
             )}
 
-          {/* Canvas内ドラッグプレビュー */}
-          {draggingElement && draggedElementInfo && (
+          {/* Canvas内ドラッグプレビュー - 簡略化 */}
+          {false && (
             <View
               style={[
                 styles.dragPreviewInCanvas,
@@ -1490,9 +1413,10 @@ export default function EditorScreen() {
       {/* Status bar */}
       <View style={styles.statusBar}>
         <Text style={styles.statusText}>
-          要素数: {elements.length} | 選択中: {selectedTemplate || "なし"}
-          {selectedElement && " | 選択要素あり"}
+          選択ツール: {templates.find(t => t.type === selectedTemplate)?.name || "なし"}
+          {selectedElement && " | 要素選択中"}
           {draggingElement && " | ドラッグ中"}
+          {mapName && ` | ${mapName}`}
         </Text>
       </View>
 
@@ -1501,7 +1425,10 @@ export default function EditorScreen() {
         visible={showTemplateModal}
         animationType="slide"
         presentationStyle={Platform.OS === "ios" ? "pageSheet" : "fullScreen"}
-        onRequestClose={() => setShowTemplateModal(false)}
+        onRequestClose={() => {
+          console.log("🔒 Template modal closing");
+          setShowTemplateModal(false);
+        }}
       >
         <SafeAreaView style={styles.modalContainer}>
           <ThemedView style={styles.modalContent}>
@@ -1509,7 +1436,10 @@ export default function EditorScreen() {
               <ThemedText type="title">マップテンプレート</ThemedText>
               <Pressable
                 style={styles.modalCloseButton}
-                onPress={() => setShowTemplateModal(false)}
+                onPress={() => {
+                  console.log("✕ Template modal close button pressed");
+                  setShowTemplateModal(false);
+                }}
               >
                 <Text style={styles.modalCloseText}>✕</Text>
               </Pressable>
@@ -1572,38 +1502,289 @@ export default function EditorScreen() {
                   {/* Template Preview */}
                   <View style={styles.templatePreviewContainer}>
                     <View style={styles.templatePreviewCanvas}>
-                      {template.elements.map((element) => (
-                        <View
-                          key={element.id}
-                          style={[
-                            styles.templatePreviewElement,
-                            {
-                              left: (element.x / template.metadata.width) * 120,
-                              top: (element.y / template.metadata.height) * 80,
-                              width: Math.max(
-                                4,
-                                (element.width / template.metadata.width) * 120
-                              ),
-                              height: Math.max(
-                                4,
-                                (element.height / template.metadata.height) * 80
-                              ),
-                              backgroundColor: getElementColor(element.type),
-                              transform: [{ rotate: `${element.rotation}deg` }],
-                            },
-                          ]}
-                        />
-                      ))}
+                      {template.elements && template.elements.length > 0 ? (
+                        template.elements.slice(0, 10).map((element, index) => {
+                          try {
+                            const previewWidth = 120;
+                            const previewHeight = 80;
+                            
+                            // 安全な計算でプレビューサイズを決定
+                            const scaleX = template.metadata?.width > 0 ? previewWidth / template.metadata.width : 0.5;
+                            const scaleY = template.metadata?.height > 0 ? previewHeight / template.metadata.height : 0.5;
+                            
+                            return (
+                              <View
+                                key={`preview_${template.id}_${index}`}
+                                style={[
+                                  styles.templatePreviewElement,
+                                  {
+                                    left: Math.max(0, Math.min((element.x || 0) * scaleX, previewWidth - 4)),
+                                    top: Math.max(0, Math.min((element.y || 0) * scaleY, previewHeight - 4)),
+                                    width: Math.max(4, Math.min((element.width || 20) * scaleX, previewWidth)),
+                                    height: Math.max(4, Math.min((element.height || 20) * scaleY, previewHeight)),
+                                    backgroundColor: getElementColor(element.type),
+                                  },
+                                ]}
+                              />
+                            );
+                          } catch (error) {
+                            console.error("Error rendering preview element:", error);
+                            return null;
+                          }
+                        })
+                      ) : (
+                        <View style={styles.emptyPreview}>
+                          <Text style={styles.emptyPreviewText}>プレビューなし</Text>
+                        </View>
+                      )}
                     </View>
                     <Pressable
                       style={styles.useTemplateButton}
-                      onPress={() => loadMapTemplate(template)}
+                      onPress={() => {
+                        console.log("🎯 Template button pressed:", template.name);
+                        loadMapTemplate(template);
+                      }}
                     >
                       <Text style={styles.useTemplateButtonText}>使用する</Text>
                     </Pressable>
                   </View>
                 </View>
               ))}
+            </ScrollView>
+          </ThemedView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Save Map Modal */}
+      <Modal
+        visible={showSaveModal}
+        animationType="slide"
+        presentationStyle={Platform.OS === "ios" ? "formSheet" : "fullScreen"}
+        onRequestClose={() => setShowSaveModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <ThemedView style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <ThemedText type="title">マップを保存</ThemedText>
+              <Pressable
+                style={styles.modalCloseButton}
+                onPress={() => setShowSaveModal(false)}
+              >
+                <Text style={styles.modalCloseText}>×</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.saveModalForm}>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>マップ名 *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={mapName}
+                  onChangeText={setMapName}
+                  placeholder="例: 東京駅構内図"
+                  placeholderTextColor="#999"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>説明</Text>
+                <TextInput
+                  style={[styles.formInput, styles.formTextArea]}
+                  value={mapDescription}
+                  onChangeText={setMapDescription}
+                  placeholder="マップの説明を入力"
+                  placeholderTextColor="#999"
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>カテゴリ</Text>
+                <ScrollView
+                  horizontal
+                  style={styles.categorySelector}
+                  showsHorizontalScrollIndicator={false}
+                >
+                  {templateCategories.map((cat) => (
+                    <Pressable
+                      key={cat.category}
+                      style={[
+                        styles.categorySelectorItem,
+                        selectedCategory === cat.category &&
+                          styles.selectedCategorySelectorItem,
+                      ]}
+                      onPress={() => setSelectedCategory(cat.category)}
+                    >
+                      <Text style={styles.categorySelectorIcon}>{cat.icon}</Text>
+                      <Text
+                        style={[
+                          styles.categorySelectorText,
+                          selectedCategory === cat.category &&
+                            styles.selectedCategorySelectorText,
+                        ]}
+                      >
+                        {cat.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+
+              <Pressable
+                style={[
+                  styles.saveConfirmButton,
+                  {
+                    backgroundColor: mapName.trim()
+                      ? Colors[colorScheme ?? "light"].tint
+                      : "#CCC",
+                  },
+                ]}
+                onPress={async () => {
+                  if (!user || !mapName.trim()) return;
+
+                  setIsSaving(true);
+                  try {
+                    const mapRequest: MapSaveRequest = {
+                      name: mapName,
+                      description: mapDescription,
+                      category: selectedCategory,
+                      floors: [
+                        {
+                          id: MapModel.generateId(),
+                          level: 0,
+                          name: "Ground Floor",
+                          elements: elements,
+                          connections: [],
+                        },
+                      ],
+                      metadata: {
+                        totalWidth: CANVAS_WIDTH,
+                        totalHeight: CANVAS_HEIGHT,
+                        tags: [],
+                      },
+                    };
+
+                    if (currentMapId) {
+                      await MapService.updateMap(
+                        currentMapId,
+                        mapRequest,
+                        user.uid
+                      );
+                    } else {
+                      const savedMap = await MapService.saveMap(
+                        mapRequest,
+                        user.uid
+                      );
+                      setCurrentMapId(savedMap.id);
+                    }
+
+                    Alert.alert("成功", "マップが保存されました");
+                    setShowSaveModal(false);
+                  } catch (err) {
+                    Alert.alert("エラー", "保存に失敗しました");
+                    console.error("Save error:", err);
+                  } finally {
+                    setIsSaving(false);
+                  }
+                }}
+                disabled={!mapName.trim() || isSaving}
+              >
+                <Text style={styles.saveConfirmButtonText}>
+                  {isSaving ? "保存中..." : "保存"}
+                </Text>
+              </Pressable>
+            </ScrollView>
+          </ThemedView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Load Map Modal */}
+      <Modal
+        visible={showLoadModal}
+        animationType="slide"
+        presentationStyle={Platform.OS === "ios" ? "pageSheet" : "fullScreen"}
+        onRequestClose={() => setShowLoadModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <ThemedView style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <ThemedText type="title">マップを読み込み</ThemedText>
+              <Pressable
+                style={styles.modalCloseButton}
+                onPress={() => setShowLoadModal(false)}
+              >
+                <Text style={styles.modalCloseText}>×</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.loadModalList}>
+              {userMaps.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateText}>
+                    保存されたマップがありません
+                  </Text>
+                </View>
+              ) : (
+                userMaps.map((map) => (
+                  <Pressable
+                    key={map.id}
+                    style={styles.mapListItem}
+                    onPress={() => {
+                      // Load map data
+                      if (map.floors && map.floors.length > 0) {
+                        const floor = map.floors[0];
+                        setElements(floor.elements || []);
+                        setMapName(map.name);
+                        setMapDescription(map.description || "");
+                        setCurrentMapId(map.id);
+                        setSelectedCategory(map.category);
+                        setShowLoadModal(false);
+                      }
+                    }}
+                  >
+                    <View style={styles.mapListItemInfo}>
+                      <Text style={styles.mapListItemName}>{map.name}</Text>
+                      {map.description && (
+                        <Text style={styles.mapListItemDescription}>
+                          {map.description}
+                        </Text>
+                      )}
+                      <Text style={styles.mapListItemMeta}>
+                        更新: {new Date(map.updatedAt).toLocaleDateString()}
+                      </Text>
+                    </View>
+                    <View style={styles.mapListItemActions}>
+                      <Pressable
+                        style={styles.mapDeleteButton}
+                        onPress={async () => {
+                          Alert.alert(
+                            "確認",
+                            `"${map.name}"を削除しますか？`,
+                            [
+                              { text: "キャンセル", style: "cancel" },
+                              {
+                                text: "削除",
+                                style: "destructive",
+                                onPress: async () => {
+                                  if (user) {
+                                    await MapService.deleteMap(map.id, user.uid);
+                                    const updatedMaps =
+                                      await MapService.getUserMaps(user.uid);
+                                    setUserMaps(updatedMaps);
+                                  }
+                                },
+                              },
+                            ]
+                          );
+                        }}
+                      >
+                        <Text style={styles.mapDeleteButtonText}>🗑</Text>
+                      </Pressable>
+                    </View>
+                  </Pressable>
+                ))
+              )}
             </ScrollView>
           </ThemedView>
         </SafeAreaView>
@@ -1621,10 +1802,25 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingTop: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E0E0E0",
+    zIndex: 1000,
+    backgroundColor: "white",
   },
-  headerActions: {
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 8,
+    flex: 1,
+  },
+  elementCount: {
+    fontSize: 14,
+    color: "#666",
+    fontWeight: "normal",
+  },
+  headerRight: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -1644,20 +1840,23 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   undoRedoButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  undoRedoButtonText: {
+  undoRedoIcon: {
     color: "white",
-    fontSize: 12,
-    fontWeight: "600",
+    fontSize: 18,
+    fontWeight: "bold",
   },
   toolbar: {
     flexDirection: "row",
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
     alignItems: "center",
+    backgroundColor: "#FAFAFA",
     borderBottomWidth: 1,
     borderBottomColor: "#E0E0E0",
   },
@@ -1671,37 +1870,43 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   quickActionButton: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 6,
-    minWidth: 60,
+    borderRadius: 20,
     alignItems: "center",
+    marginRight: 8,
   },
   quickActionText: {
     color: "white",
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "600",
   },
   elementTemplateButton: {
     alignItems: "center",
-    marginRight: 16,
-    padding: 8,
-    borderRadius: 8,
+    marginRight: 12,
+    padding: 10,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: "transparent",
+    backgroundColor: "#F8F9FA",
   },
   selectedTemplate: {
     borderColor: "#007AFF",
+    backgroundColor: "#E8F4FD",
   },
   templatePreview: {
     width: 40,
     height: 30,
-    borderRadius: 4,
-    marginBottom: 4,
+    borderRadius: 6,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.1)",
   },
   templateText: {
-    fontSize: 12,
-    fontWeight: "500",
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#333",
+    textAlign: "center",
   },
   canvasContainer: {
     flex: 1,
@@ -1927,5 +2132,196 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 12,
     fontWeight: "600",
+  },
+  // Save Modal styles
+  saveModalForm: {
+    padding: 20,
+  },
+  formGroup: {
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 8,
+  },
+  formInput: {
+    borderWidth: 1,
+    borderColor: "#DDD",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    backgroundColor: "#FFF",
+  },
+  formTextArea: {
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  categorySelector: {
+    flexDirection: "row",
+    marginTop: 8,
+  },
+  categorySelectorItem: {
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+    borderRadius: 8,
+    backgroundColor: "#F5F5F5",
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  selectedCategorySelectorItem: {
+    borderColor: "#007AFF",
+    backgroundColor: "#E8F4FD",
+  },
+  categorySelectorIcon: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+  categorySelectorText: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#666",
+  },
+  selectedCategorySelectorText: {
+    color: "#007AFF",
+  },
+  saveConfirmButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  saveConfirmButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  // Load Modal styles
+  loadModalList: {
+    padding: 16,
+  },
+  emptyState: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: "#999",
+  },
+  mapListItem: {
+    flexDirection: "row",
+    backgroundColor: "#FAFAFA",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  mapListItemInfo: {
+    flex: 1,
+  },
+  mapListItemName: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 4,
+  },
+  mapListItemDescription: {
+    fontSize: 13,
+    color: "#666",
+    marginBottom: 8,
+  },
+  mapListItemMeta: {
+    fontSize: 11,
+    color: "#999",
+  },
+  mapListItemActions: {
+    justifyContent: "center",
+  },
+  mapDeleteButton: {
+    padding: 8,
+  },
+  mapDeleteButtonText: {
+    fontSize: 20,
+  },
+  overlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9998,
+    backgroundColor: "transparent",
+  },
+  actionsMenuContainer: {
+    position: "relative",
+    zIndex: 10000,
+  },
+  actionsMenuButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionsMenuButtonText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  actionsDropdown: {
+    position: "absolute",
+    top: 42,
+    right: 0,
+    backgroundColor: "white",
+    borderRadius: 12,
+    paddingVertical: 8,
+    minWidth: 160,
+    elevation: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    zIndex: 10001,
+    ...(Platform.OS === "web" && {
+      boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
+    }),
+  },
+  actionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  },
+  actionItemDisabled: {
+    opacity: 0.5,
+  },
+  actionItemIcon: {
+    fontSize: 16,
+  },
+  actionItemText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#333",
+  },
+  actionItemTextDisabled: {
+    color: "#999",
+  },
+  emptyPreview: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyPreviewText: {
+    fontSize: 10,
+    color: "#999",
   },
 });
